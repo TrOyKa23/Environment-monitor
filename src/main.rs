@@ -30,14 +30,23 @@ async fn main(_spawner: Spawner) {
 
     let i2c = i2c::I2c::new_async(p.I2C0, scl, sda, Irqs, I2cConfig::default());
 
+    info!("Initializing BME280...");
+
     let mut bme280 = AsyncBme280::new(i2c, Delay);
 
-    bme280
-        .init()
-        .await
-        .expect("не удалось инициализировать BME280");
+    match bme280.init().await {
+        Ok(_) => {
+            info!("✓ BME280 inicialized");
+        }
+        Err(e) => {
+            info!("❌ Inicialisation error: {:?}", defmt::Debug2Format(&e));
+            loop {
+                Timer::after_secs(1).await;
+            }
+        }
+    }
 
-    bme280
+    match bme280
         .set_sampling_configuration(
             Configuration::default()
                 .with_temperature_oversampling(Oversampling::Oversample1)
@@ -46,15 +55,20 @@ async fn main(_spawner: Spawner) {
                 .with_sensor_mode(SensorMode::Normal),
         )
         .await
-        .expect("не удалось настроить BME280");
-
-    info!("BME280 готов, начинаю замеры");
+    {
+        Ok(_) => info!("✓ Config done"),
+        Err(_) => info!("❌ Error config"),
+    }
 
     loop {
         match bme280.read_temperature().await {
-            Ok(Some(temp)) => info!("Температура: {} °C", temp),
-            Ok(None) => info!("Измерение температуры отключено"),
-            Err(_) => info!("Ошибка чтения с BME280"),
+            Ok(Some(temp)) => {
+                let temp_int = temp as i32;
+                let temp_frac = ((temp * 10.0) as i32 % 100).abs();
+                info!("temp: {}.{} C", temp_int, temp_frac);
+            }
+            Ok(None) => info!("Measurement enabled"),
+            Err(_e) => info!("Error reading"),
         }
 
         Timer::after_secs(1).await;
