@@ -5,7 +5,7 @@ target = "thumbv8m.main-none-eabihf"
 DEFMT_LOG = "info" # Включает выводы info!, warn!, error!
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip RP235A --rtt-scan-memory --log-format oneline"
+runner = "probe-rs run --chip RP235x --rtt-scan-memory --log-format oneline"
 
 rustflags = [
     "-C",
