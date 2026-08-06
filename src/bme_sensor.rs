@@ -1,7 +1,6 @@
 use bme280_rs::{AsyncBme280, Configuration, Oversampling, SensorMode};
 use defmt::info;
 
-/// Инициализирует BME280 на уже готовой шине I2C и включает непрерывный (Normal) режим измерений всех трёх величин: температуры, влажности и давления. Возвращает `Err(())` при ошибке инициализации - что делать дальше (например, зависнуть в цикле), решает вызывающий код.
 pub async fn init<I2C, D>(i2c: I2C, delay: D) -> Result<AsyncBme280<I2C, D>, ()>
 where
     I2C: embedded_hal_async::i2c::I2c,
@@ -24,7 +23,11 @@ where
                 .with_humidity_oversampling(Oversampling::Oversample1)
                 .with_sensor_mode(SensorMode::Normal),
         )
-        .await {}
+        .await
+    {
+        Ok(_) => info!("BME280 config done"),
+        Err(_) => info!("BME280 config error"),
+    }
 
     Ok(bme280)
 }

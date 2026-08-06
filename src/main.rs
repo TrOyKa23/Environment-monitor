@@ -1,7 +1,11 @@
 #![no_std]
 #![no_main]
 
-use bme280_rs::{AsyncBme280, Configuration, Oversampling, SensorMode};
+mod bme_sensor;
+mod display;
+mod sdcard;
+mod ui;
+
 use core::cell::RefCell;
 use defmt::info;
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
@@ -11,21 +15,9 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::i2c::{self, Config as I2cConfig, InterruptHandler as I2cInterruptHandler};
 use embassy_rp::peripherals::I2C0;
 use embassy_rp::spi::{self, Spi};
-use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::{Delay, Instant, Timer};
-use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::ascii::FONT_10X20;
-use embedded_graphics::pixelcolor::Rgb565;
-use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-use embedded_graphics::text::Text;
-use embedded_sdmmc::{Mode, SdCard, TimeSource, Timestamp, VolumeIdx, VolumeManager};
-use heapless::String;
-use mipidsi::Builder;
-use mipidsi::interface::SpiInterface;
-use mipidsi::models::ST7789;
-use mipidsi::options::{ColorInversion, Orientation, Rotation};
 
 use {defmt_rtt as _, panic_probe as _};
 
@@ -38,70 +30,25 @@ bind_interrupts!(struct Irqs {
     I2C0_IRQ => I2cInterruptHandler<I2C0>;
 });
 
-const LOG_FILE: &str = "TEMPLOG.CSV";
-
-/// TIP 1 --------
-#[derive(Default)]
-struct DummyTimesource;
-
-impl TimeSource for DummyTimesource {
-    fn get_timestamp(&self) -> Timestamp {
-        Timestamp {
-            year_since_1970: 0,
-            zero_indexed_month: 0,
-            zero_indexed_day: 0,
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-        }
-    }
-}
-
-/// TIP 2 --------
-fn format_uptime(buf: &mut String<16>, elapsed_secs: u64) {
-    let h = elapsed_secs / 3600;
-    let m = (elapsed_secs % 3600) / 60;
-    let s = elapsed_secs % 60;
-    let _ = core::fmt::write(buf, format_args!("{:02}:{:02}:{:02}", h, m, s));
-}
-
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    // BME280 (I2C0) --------
     let sda = p.PIN_4;
     let scl = p.PIN_5;
     let i2c = i2c::I2c::new_async(p.I2C0, scl, sda, Irqs, I2cConfig::default());
 
-    info!("Initializing BME280...");
-    let mut bme280 = AsyncBme280::new(i2c, Delay);
-
-    match bme280.init().await {
-        Ok(_) => info!("BME280 initialized"),
-        Err(e) => {
-            info!("Init error: {:?}", defmt::Debug2Format(&e));
+    let mut bme280 = match bme_sensor::init(i2c, Delay).await {
+        Ok(sensor) => sensor,
+        Err(_) => {
+            info!("BME280 init failed - halting");
             loop {
                 Timer::after_secs(1).await;
             }
         }
-    }
+    };
 
-    match bme280
-        .set_sampling_configuration(
-            Configuration::default()
-                .with_temperature_oversampling(Oversampling::Oversample1)
-                .with_pressure_oversampling(Oversampling::Oversample1)
-                .with_humidity_oversampling(Oversampling::Oversample1)
-                .with_sensor_mode(SensorMode::Normal),
-        )
-        .await
-    {
-        Ok(_) => info!("Config done"),
-        Err(_) => info!("Error config"),
-    }
-
-    // TIP 3 --------
+    // TIP 3  
     let clk = p.PIN_10;
     let mosi = p.PIN_11;
     let miso = p.PIN_8;
@@ -127,119 +74,48 @@ async fn main(_spawner: Spawner) {
     rst.set_high();
     Timer::after_millis(10).await;
 
-    // SD --------
-    let sdcard = SdCard::new(sd_spi, Delay);
-    let card_ok = match sdcard.num_bytes() {
-        Ok(size) => {
-            info!("SD card size: {} bytes", size);
-            true
-        }
-        Err(_) => {
-            info!("SD card init failed - logging to SD disabled");
-            false
-        }
-    };
+    // SD-карта ----------
+    let logger = sdcard::TempLogger::new(sd_spi);
 
-    let volume_mgr = VolumeManager::new(sdcard, DummyTimesource);
-
-    if card_ok {
-        match volume_mgr.open_volume(VolumeIdx(0)) {
-            Ok(volume0) => match volume0.open_root_dir() {
-                Ok(root_dir) => {
-                    // table opening try: if OK - file (table) exists and header doesn't need to be written
-                    let file_exists = root_dir.open_file_in_dir(LOG_FILE, Mode::ReadOnly).is_ok();
-                    if !file_exists {
-                        match root_dir.open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend) {
-                            Ok(file) => {
-                                let _ = file.write(b"Uptime,TemperatureC\n");
-                                let _ = file.flush();
-                                info!("Created {} with header", LOG_FILE);
-                            }
-                            Err(_) => info!("Failed to create log file"),
-                        }
-                    }
-                }
-                Err(_) => info!("Failed to open root dir"),
-            },
-            Err(_) => info!("Failed to open volume"),
-        }
-    }
-
-    // LCD (ST7789) ----------
+    // LCD ----------
+    let mut lcd_delay = Delay;
     let mut buffer = [0u8; 512];
-    let di = SpiInterface::new(lcd_spi, dc, &mut buffer);
-    let mut delay = Delay;
+    let mut disp = display::init(lcd_spi, dc, &mut buffer, &mut lcd_delay);
 
-    let mut display = Builder::new(ST7789, di)
-        .display_size(240, 320)
-        .orientation(Orientation::new().rotate(Rotation::Deg270))
-        .invert_colors(ColorInversion::Normal)
-        .init(&mut delay)
-        .expect("display init failed");
-
-    display.clear(Rgb565::BLACK).ok();
-
-    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-    let clear_style = PrimitiveStyle::with_fill(Rgb565::BLACK);
+    let mut dashboard = ui::Dashboard::new();
 
     info!("Display initialized");
 
     let start = Instant::now();
 
     loop {
-        match bme280.read_temperature().await {
-            Ok(Some(temp)) => {
-                let temp_int = temp as i32;
-                let temp_frac = ((temp * 10.0) as i32 % 100).abs();
+        match bme280.read_sample().await {
+            Ok(sample) => {
+                let temp_c = sample.temperature.unwrap_or(0.0);
+                let humidity_pct = sample.humidity.unwrap_or(0.0);
+                let pressure_hpa = sample.pressure.unwrap_or(0.0) / 100.0;
 
-                info!("temp: {}.{} C", temp_int, temp_frac);
+                let t_int = temp_c as i32;
+                let t_frac = ((temp_c * 10.0) as i32 % 10).abs();
+                let h_int = humidity_pct as i32;
+                let h_frac = ((humidity_pct * 10.0) as i32 % 10).abs();
+                let p_int = pressure_hpa as i32;
+                let p_frac = ((pressure_hpa * 10.0) as i32 % 10).abs();
 
-                // Обновляем показания на экране.
-                Rectangle::new(Point::new(10, 10), Size::new(220, 30))
-                    .into_styled(clear_style)
-                    .draw(&mut display)
-                    .ok();
-
-                let mut line: String<32> = String::new();
-                let _ = core::fmt::write(
-                    &mut line,
-                    format_args!("Temp: {}.{} C", temp_int, temp_frac),
+                info!(
+                    "temp: {}.{} C, humidity: {}.{} %, pressure: {}.{} hPa",
+                    t_int, t_frac, h_int, h_frac, p_int, p_frac
                 );
-                Text::new(&line, Point::new(10, 30), text_style)
-                    .draw(&mut display)
-                    .ok();
 
-                // adding CSV-log on SD
-                if card_ok {
-                    let elapsed_secs = (Instant::now() - start).as_secs();
-                    let mut time_str: String<16> = String::new();
-                    format_uptime(&mut time_str, elapsed_secs);
+                let uptime_secs = (Instant::now() - start).as_secs();
 
-                    let mut csv_line: String<48> = String::new();
-                    let _ = core::fmt::write(
-                        &mut csv_line,
-                        format_args!("{},{}.{}\n", time_str, temp_int, temp_frac),
-                    );
+                dashboard.update(&mut disp, uptime_secs, temp_c, humidity_pct, pressure_hpa);
 
-                    match volume_mgr.open_volume(VolumeIdx(0)) {
-                        Ok(volume0) => match volume0.open_root_dir() {
-                            Ok(root_dir) => match root_dir
-                                .open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend)
-                            {
-                                Ok(file) => {
-                                    let _ = file.write(csv_line.as_bytes());
-                                    let _ = file.flush();
-                                }
-                                Err(_) => info!("Failed to open log file for write"),
-                            },
-                            Err(_) => info!("Failed to open root dir"),
-                        },
-                        Err(_) => info!("Failed to open volume"),
-                    }
+                if let Some(logger) = &logger {
+                    logger.log_sample(uptime_secs, temp_c, humidity_pct, pressure_hpa);
                 }
             }
-            Ok(None) => info!("Measurement enabled"),
-            Err(_e) => info!("Error reading"),
+            Err(_e) => info!("Error reading sample"),
         }
 
         Timer::after_secs(1).await;
