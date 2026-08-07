@@ -11,7 +11,7 @@ A smart environmental monitoring station powered by Raspberry Pi Pico 2 W with S
 
 ## Description
 
-Environment-monitor is an embedded Rust application built on the Embassy async framework for the Raspberry Pi Pico 2 W (RP2350)[cite: 3, 6]. It periodically samples ambient temperature and barometric pressure using a BME280 sensor over I2C[cite: 1, 3], displays real-time sparkline graphs and telemetry on an ST7789 LCD screen[cite: 2, 5], logs data to a MicroSD card in CSV format (`TEMPLOG.CSV`)[cite: 4], and transmits batch logs every 30 minutes via Wi-Fi to a remote server for daily, weekly, monthly, and yearly trend plotting.
+Environment-monitor is an embedded Rust application built on the Embassy async framework for the Raspberry Pi Pico 2 W (RP2350). It periodically samples ambient temperature and barometric pressure using a BME280 sensor over I2C, displays real-time sparkline graphs and telemetry on an ST7789 LCD screen, logs data to a MicroSD card in CSV format (`TEMPLOG.CSV`), and transmits batch logs every 30 minutes via Wi-Fi to a remote server for daily, weekly, monthly, and yearly trend plotting.
 
 ## Motivation
 
@@ -21,9 +21,9 @@ This project was built for educational and self-learning purposes to explore emb
 
 The architecture consists of an async Rust runtime executing concurrent tasks on the RP2350 microcontroller:
 
-- **Main Processor**: Raspberry Pi Pico 2 W running the Embassy async executor[cite: 3, 6].
-- **BME280 Sensor**: Communicates over I2C0 to provide temperature and pressure readings[cite: 1, 3].
-- **ST7789 Display & SD Card**: Share the SPI1 bus using mutex-guarded SPI device handles (`SpiDeviceWithConfig`)[cite: 3].
+- **Main Processor**: Raspberry Pi Pico 2 W running the Embassy async executor.
+- **BME280 Sensor**: Communicates over I2C0 to provide temperature and pressure readings.
+- **ST7789 Display & SD Card**: Share the SPI1 bus using mutex-guarded SPI device handles (`SpiDeviceWithConfig`).
 - **SWD Probe**: A secondary Raspberry Pi Pico 2 W acts as an external hardware debugger via SWD (SWCLK, SWDIO).
 - **Wi-Fi Subsystem**: Uses `cyw43` and `embassy-net` stacks to handle TCP/IP network transport.
 
@@ -50,19 +50,19 @@ The architecture consists of an async Rust runtime executing concurrent tasks on
 
 ### Milestone 1 — Project Initialization & Sensor Setup
 
-- Configured Rust toolchain for target `thumbv8m.main-none-eabihf` and RP2350 chip definitions (`memory.x`, `build.rs`)[cite: 6, 7, 8, 9].
-- Integrated `bme280-rs` driver over async I2C[cite: 1, 3, 6].
-- Set up RTT logging via `defmt-rtt` and `panic-probe`[cite: 3, 6].
+- Configured Rust toolchain for target `thumbv8m.main-none-eabihf` and RP2350 chip definitions (`memory.x`, `build.rs`).
+- Integrated `bme280-rs` driver over async I2C.
+- Set up RTT logging via `defmt-rtt` and `panic-probe`.
 
 ### Milestone 2 — Shared SPI Bus & Display UI
 
-- Implemented ST7789 display driver using `mipidsi` over SPI1[cite: 2, 3, 6].
-- Created `ui.rs` dashboard featuring a top header bar, status icons, uptime counter, big numerical readouts, and custom sparkline history charts using `embedded-graphics`[cite: 3, 5, 6].
+- Implemented ST7789 display driver using `mipidsi` over SPI1.
+- Created `ui.rs` dashboard featuring a top header bar, status icons, uptime counter, big numerical readouts, and custom sparkline history charts using `embedded-graphics`.
 
 ### Milestone 3 — SD Card Filesystem Integration
 
-- Implemented shared SPI bus architecture (`SpiDeviceWithConfig` and `NoopRawMutex`) to allow safe multiplexing between display and SD card[cite: 3, 6].
-- Integrated `embedded-sdmmc` to manage FAT volumes and automate CSV log writing (`TEMPLOG.CSV`) with formatting and header initialization[cite: 4, 6].
+- Implemented shared SPI bus architecture (`SpiDeviceWithConfig` and `NoopRawMutex`) to allow safe multiplexing between display and SD card.
+- Integrated `embedded-sdmmc` to manage FAT volumes and automate CSV log writing (`TEMPLOG.CSV`) with formatting and header initialization.
 
 ### Milestone 4 — Async Network Stack & Server Sync
 
@@ -88,17 +88,17 @@ The system utilizes a Raspberry Pi Pico 2 W as the central unit connected to an 
 
 ## Software
 
-| Library                                                         | Description                       | Usage                                                                   |
-| --------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------- |
-| [embassy-executor](https://github.com/embassy-rs/embassy)       | Async task executor               | Drives background execution tasks[cite: 3, 6]                           |
-| [embassy-rp](https://github.com/embassy-rs/embassy)             | RP2350 Hardware Abstraction Layer | Manages I2C, SPI, GPIO, PIO, and hardware peripherals[cite: 3, 6]       |
-| [bme280-rs](https://crates.io/crates/bme280-rs)                 | Async BME280 sensor driver        | Reads temperature and pressure data asynchronously[cite: 1, 6]          |
-| [mipidsi](https://crates.io/crates/mipidsi)                     | Display controller driver         | Drives ST7789 LCD display initialization[cite: 2, 6]                    |
-| [embedded-graphics](https://crates.io/crates/embedded-graphics) | 2D graphics engine                | Renders text, icons, containers, and sparkline trend graphs[cite: 5, 6] |
-| [embedded-sdmmc](https://crates.io/crates/embedded-sdmmc)       | FAT volume and SD card driver     | Writes CSV log records to SD filesystem[cite: 4, 6]                     |
-| [cyw43](https://crates.io/crates/cyw43)                         | Wi-Fi chip driver                 | Manages wireless connection on CYW43439                                 |
-| [embassy-net](https://crates.io/crates/embassy-net)             | Async network stack               | Handles DHCP, TCP, and network sockets                                  |
-| [defmt](https://crates.io/crates/defmt)                         | Efficient logging framework       | Prints internal diagnostics and status over SWD/RTT[cite: 1, 3, 4, 6]   |
+| Library                                                         | Description                       | Usage                                                       |
+| --------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
+| [embassy-executor](https://github.com/embassy-rs/embassy)       | Async task executor               | Drives background execution tasks                           |
+| [embassy-rp](https://github.com/embassy-rs/embassy)             | RP2350 Hardware Abstraction Layer | Manages I2C, SPI, GPIO, PIO, and hardware peripherals       |
+| [bme280-rs](https://crates.io/crates/bme280-rs)                 | Async BME280 sensor driver        | Reads temperature and pressure data asynchronously          |
+| [mipidsi](https://crates.io/crates/mipidsi)                     | Display controller driver         | Drives ST7789 LCD display initialization                    |
+| [embedded-graphics](https://crates.io/crates/embedded-graphics) | 2D graphics engine                | Renders text, icons, containers, and sparkline trend graphs |
+| [embedded-sdmmc](https://crates.io/crates/embedded-sdmmc)       | FAT volume and SD card driver     | Writes CSV log records to SD filesystem                     |
+| [cyw43](https://crates.io/crates/cyw43)                         | Wi-Fi chip driver                 | Manages wireless connection on CYW43439                     |
+| [embassy-net](https://crates.io/crates/embassy-net)             | Async network stack               | Handles DHCP, TCP, and network sockets                      |
+| [defmt](https://crates.io/crates/defmt)                         | Efficient logging framework       | Prints internal diagnostics and status over SWD/RTT         |
 
 ## Links
 
