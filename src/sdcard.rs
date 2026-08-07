@@ -56,8 +56,7 @@ where
                     if !file_exists {
                         match root_dir.open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend) {
                             Ok(file) => {
-                                let _ = file
-                                    .write(b"Uptime,TemperatureC,HumidityPercent,PressureHPa\n");
+                                let _ = file.write(b"Uptime,TemperatureC,PressureHPa\n");
                                 let _ = file.flush();
                                 info!("Created {} with header", LOG_FILE);
                             }
@@ -74,7 +73,7 @@ where
     }
 
     // log sample to file (+ 1 row of data)
-    pub fn log_sample(&self, uptime_secs: u64, temp_c: f32, humidity_pct: f32, pressure_hpa: f32) {
+    pub fn log_sample(&self, uptime_secs: u64, temp_c: f32, pressure_hpa: f32) {
         let h = uptime_secs / 3600;
         let m = (uptime_secs % 3600) / 60;
         let s = uptime_secs % 60;
@@ -82,8 +81,8 @@ where
         let mut csv_line: String<64> = String::new();
         let _ = write!(
             csv_line,
-            "{:02}:{:02}:{:02},{:.1},{:.1},{:.1}\n",
-            h, m, s, temp_c, humidity_pct, pressure_hpa
+            "{:02}:{:02}:{:02},{:.1},{:.1}\n",
+            h, m, s, temp_c, pressure_hpa
         );
 
         match self.volume_mgr.open_volume(VolumeIdx(0)) {

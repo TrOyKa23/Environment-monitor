@@ -15,8 +15,8 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::i2c::{self, Config as I2cConfig, InterruptHandler as I2cInterruptHandler};
 use embassy_rp::peripherals::I2C0;
 use embassy_rp::spi::{self, Spi};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Delay, Instant, Timer};
 
 use {defmt_rtt as _, panic_probe as _};
@@ -48,7 +48,7 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    // TIP 3  
+    // TIP 3
     let clk = p.PIN_10;
     let mosi = p.PIN_11;
     let miso = p.PIN_8;
@@ -92,27 +92,24 @@ async fn main(_spawner: Spawner) {
         match bme280.read_sample().await {
             Ok(sample) => {
                 let temp_c = sample.temperature.unwrap_or(0.0);
-                let humidity_pct = sample.humidity.unwrap_or(0.0);
                 let pressure_hpa = sample.pressure.unwrap_or(0.0) / 100.0;
 
                 let t_int = temp_c as i32;
                 let t_frac = ((temp_c * 10.0) as i32 % 10).abs();
-                let h_int = humidity_pct as i32;
-                let h_frac = ((humidity_pct * 10.0) as i32 % 10).abs();
                 let p_int = pressure_hpa as i32;
                 let p_frac = ((pressure_hpa * 10.0) as i32 % 10).abs();
 
                 info!(
-                    "temp: {}.{} C, humidity: {}.{} %, pressure: {}.{} hPa",
-                    t_int, t_frac, h_int, h_frac, p_int, p_frac
+                    "temp: {}.{} C, pressure: {}.{} hPa",
+                    t_int, t_frac, p_int, p_frac
                 );
 
                 let uptime_secs = (Instant::now() - start).as_secs();
 
-                dashboard.update(&mut disp, uptime_secs, temp_c, humidity_pct, pressure_hpa);
+                dashboard.update(&mut disp, uptime_secs, temp_c, pressure_hpa);
 
                 if let Some(logger) = &logger {
-                    logger.log_sample(uptime_secs, temp_c, humidity_pct, pressure_hpa);
+                    logger.log_sample(uptime_secs, temp_c, pressure_hpa);
                 }
             }
             Err(_e) => info!("Error reading sample"),

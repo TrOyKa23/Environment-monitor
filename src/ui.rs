@@ -5,19 +5,16 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::{FONT_6X10, FONT_10X20};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{
-    Arc, Circle, Line, Polyline, PrimitiveStyle, Rectangle, Triangle,
-};
+use embedded_graphics::primitives::{Arc, Circle, Line, Polyline, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::Text;
 use heapless::String;
 
 const SCREEN_WIDTH: i32 = 320;
 const HEADER_HEIGHT: i32 = 24;
-const ROW_HEIGHT: i32 = (240 - HEADER_HEIGHT) / 3;
+const ROW_HEIGHT: i32 = (240 - HEADER_HEIGHT) / 2;
 const HISTORY_LEN: usize = 60;
 
 const TEMP_STEP: f32 = 0.1;
-const HUMIDITY_STEP: f32 = 1.0;
 const PRESSURE_STEP: f32 = 10.0;
 const STEPS_VISIBLE: f32 = 8.0;
 
@@ -53,15 +50,17 @@ impl History {
 
 struct Scaled<'a, D> {
     target: &'a mut D,
-    scale: i32,
+    scale_x: i32,
+    scale_y: i32,
     offset: Point,
 }
 
 impl<'a, D> Scaled<'a, D> {
-    fn new(target: &'a mut D, scale: i32, offset: Point) -> Self {
+    fn new(target: &'a mut D, scale_x: i32, scale_y: i32, offset: Point) -> Self {
         Self {
             target,
-            scale,
+            scale_x,
+            scale_y,
             offset,
         }
     }
@@ -82,11 +81,11 @@ impl<'a, D: DrawTarget> DrawTarget for Scaled<'a, D> {
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(pos, color) in pixels {
-            let x = self.offset.x + pos.x * self.scale;
-            let y = self.offset.y + pos.y * self.scale;
+            let x = self.offset.x + pos.x * self.scale_x;
+            let y = self.offset.y + pos.y * self.scale_y;
             let block = Rectangle::new(
                 Point::new(x, y),
-                Size::new(self.scale as u32, self.scale as u32),
+                Size::new(self.scale_x as u32, self.scale_y as u32),
             );
             self.target.fill_solid(&block, color)?;
         }
@@ -94,12 +93,12 @@ impl<'a, D: DrawTarget> DrawTarget for Scaled<'a, D> {
     }
 }
 
-fn draw_big_number<D>(display: &mut D, text: &str, position: Point, scale: i32)
+fn draw_big_number<D>(display: &mut D, text: &str, position: Point, scale_x: i32, scale_y: i32)
 where
     D: DrawTarget<Color = Rgb565>,
 {
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-    let mut scaled = Scaled::new(display, scale, position);
+    let mut scaled = Scaled::new(display, scale_x, scale_y, position);
     let _ = Text::new(text, Point::zero(), text_style).draw(&mut scaled);
 }
 
@@ -153,7 +152,6 @@ where
 
 enum IconKind {
     Thermometer,
-    Droplet,
     Pressure,
 }
 
@@ -168,24 +166,6 @@ where
         .into_styled(stroke)
         .draw(display);
     let _ = Circle::new(top_left + Point::new(2, 24), 12)
-        .into_styled(fill)
-        .draw(display);
-}
-
-fn draw_droplet_icon<D>(display: &mut D, top_left: Point)
-where
-    D: DrawTarget<Color = Rgb565>,
-{
-    let fill = PrimitiveStyle::with_fill(Rgb565::WHITE);
-
-    let _ = Triangle::new(
-        top_left + Point::new(9, 0),
-        top_left + Point::new(0, 16),
-        top_left + Point::new(18, 16),
-    )
-    .into_styled(fill)
-    .draw(display);
-    let _ = Circle::new(top_left + Point::new(0, 8), 18)
         .into_styled(fill)
         .draw(display);
 }
@@ -293,17 +273,16 @@ fn draw_row<D>(
 ) where
     D: DrawTarget<Color = Rgb565>,
 {
-    let number_y = row_top + (ROW_HEIGHT - 40) / 2 + 10;
+    let number_y = row_top + (ROW_HEIGHT - 40) / 2 + 50;
 
     match icon {
         IconKind::Thermometer => draw_thermometer_icon(display, Point::new(6, row_top + 24)),
-        IconKind::Droplet => draw_droplet_icon(display, Point::new(6, row_top + 26)),
         IconKind::Pressure => draw_pressure_icon(display, Point::new(6, row_top + 34)),
     }
 
     let mut text: String<8> = String::new();
     let _ = write!(text, "{:.1}", value);
-    draw_big_number(display, &text, Point::new(54, number_y), 2);
+    draw_big_number(display, &text, Point::new(54, number_y), 2, 5);
 
     let graph_rect = Rectangle::new(
         Point::new(198, row_top + 8),
@@ -314,7 +293,6 @@ fn draw_row<D>(
 
 pub struct Dashboard {
     temp_history: History,
-    humidity_history: History,
     pressure_history: History,
 }
 
@@ -322,24 +300,16 @@ impl Dashboard {
     pub fn new() -> Self {
         Self {
             temp_history: History::new(),
-            humidity_history: History::new(),
             pressure_history: History::new(),
         }
     }
 
     //full lcd refresh with new values
-    pub fn update<D>(
-        &mut self,
-        display: &mut D,
-        uptime_secs: u64,
-        temp_c: f32,
-        humidity_pct: f32,
-        pressure_hpa: f32,
-    ) where
+    pub fn update<D>(&mut self, display: &mut D, uptime_secs: u64, temp_c: f32, pressure_hpa: f32)
+    where
         D: DrawTarget<Color = Rgb565>,
     {
         self.temp_history.push(temp_c);
-        self.humidity_history.push(humidity_pct);
         self.pressure_history.push(pressure_hpa);
 
         let _ = display.clear(Rgb565::BLACK);
@@ -357,14 +327,6 @@ impl Dashboard {
         draw_row(
             display,
             HEADER_HEIGHT + ROW_HEIGHT,
-            IconKind::Droplet,
-            humidity_pct,
-            &self.humidity_history,
-            HUMIDITY_STEP,
-        );
-        draw_row(
-            display,
-            HEADER_HEIGHT + 2 * ROW_HEIGHT,
             IconKind::Pressure,
             pressure_hpa,
             &self.pressure_history,

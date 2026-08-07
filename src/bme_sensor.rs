@@ -20,7 +20,6 @@ where
             Configuration::default()
                 .with_temperature_oversampling(Oversampling::Oversample1)
                 .with_pressure_oversampling(Oversampling::Oversample1)
-                .with_humidity_oversampling(Oversampling::Oversample1)
                 .with_sensor_mode(SensorMode::Normal),
         )
         .await
