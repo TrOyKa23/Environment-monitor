@@ -53,16 +53,25 @@ The architecture consists of an async Rust runtime executing concurrent tasks on
 - Configured Rust toolchain for target `thumbv8m.main-none-eabihf` and RP2350 chip definitions (`memory.x`, `build.rs`).
 - Integrated `bme280-rs` driver over async I2C.
 - Set up RTT logging via `defmt-rtt` and `panic-probe`.
+- Soldered pins on raspberry pi pico 2w and on the bmp280 sensor
+
+![Milestone 1](./1.webp)
+![Milestone 1](./2.webp)
 
 ### Milestone 2 — Shared SPI Bus & Display UI
 
 - Implemented ST7789 display driver using `mipidsi` over SPI1.
 - Created `ui.rs` dashboard featuring a top header bar, status icons, uptime counter, big numerical readouts, and custom sparkline history charts using `embedded-graphics`.
 
+![Milestone 2](./3.webp)
+
 ### Milestone 3 — SD Card Filesystem Integration
 
 - Implemented shared SPI bus architecture (`SpiDeviceWithConfig` and `NoopRawMutex`) to allow safe multiplexing between display and SD card.
 - Integrated `embedded-sdmmc` to manage FAT volumes and automate CSV log writing (`TEMPLOG.CSV`) with formatting and header initialization.
+- Syncronizing UI and SD data
+
+![Milestone 2](./4.webp)
 
 ### Milestone 4 — Async Network Stack & Server Sync
 
@@ -75,7 +84,7 @@ The system utilizes a Raspberry Pi Pico 2 W as the central unit connected to an 
 
 ### Schematics
 
-![Hardware Schematic](./image_017d83.svg)
+![Hardware Schematic](./schema.webp)
 
 ### Bill of Materials
 
