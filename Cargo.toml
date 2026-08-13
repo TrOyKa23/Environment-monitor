@@ -6,15 +6,16 @@ edition = "2024"
 [dependencies]
 embassy-executor     = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time         = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-rp           = { version = "0.10", features = ["defmt", "rp235xa", "time-driver", "critical-section-impl", "binary-info", "pio"] }
+embassy-rp           = { version = "0.10", features = ["defmt", "rp235xa", "time-driver", "critical-section-impl", "binary-info"] }
 embassy-sync         = "0.8"
 embassy-embedded-hal = "0.6"
-embassy-net = "0.9.1"
-cyw43 = { version = "0.7", features = ["defmt", "firmware-logs"] }
-cyw43-pio = { version = "0.10", features = ["defmt"] }
 
-reqwless = { version = "0.14", features = ["defmt"] }
-static_cell = "2.1"
+# --- Wi-Fi / сетевой стек ---
+cyw43       = { version = "0.7", features = ["defmt"] }
+cyw43-pio   = { version = "0.10", features = ["defmt"] }
+embassy-net = { version = "0.9.1", features = ["defmt", "udp", "dhcpv4", "medium-ethernet"] }
+static_cell = "2"
+portable-atomic = { version = "1", features = ["critical-section"] }
 
 defmt      = "1"
 defmt-rtt  = "1"
@@ -31,7 +32,7 @@ bme280-rs = { version = "0.4", default-features = false, features = ["async", "d
 embedded-graphics = "0.8"
 mipidsi = "0.10"
 heapless = "0.9.3"
-embedded-sdmmc = "0.9"
+embedded-sdmmc = "0.10"
 
 [profile.release]
 debug = 2

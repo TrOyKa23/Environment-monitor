@@ -1,12 +1,14 @@
+use core::cell::Cell;
 use core::fmt::Write as _;
 use defmt::info;
 use embassy_time::Delay;
 use embedded_sdmmc::{Mode, SdCard, TimeSource, Timestamp, VolumeIdx, VolumeManager};
 use heapless::String;
 
+use crate::rtc;
+
 const LOG_FILE: &str = "TEMPLOG.CSV";
 
-// TIP 1
 #[derive(Default)]
 pub struct DummyTimesource;
 
@@ -29,13 +31,15 @@ where
     SPI: embedded_hal::spi::SpiDevice,
 {
     volume_mgr: VolumeManager<SdCard<SPI, Delay>, DummyTimesource>,
+    //no spam log if card removed
+    card_ok: Cell<bool>,
 }
 
 impl<SPI> TempLogger<SPI>
 where
     SPI: embedded_hal::spi::SpiDevice,
 {
-    // sd card read check
+    // no file if no time sync
     pub fn new(spi_device: SPI) -> Option<Self> {
         let sdcard = SdCard::new(spi_device, Delay);
         match sdcard.num_bytes() {
@@ -47,58 +51,68 @@ where
         }
 
         let volume_mgr = VolumeManager::new(sdcard, DummyTimesource);
-
-        match volume_mgr.open_volume(VolumeIdx(0)) {
-            Ok(volume0) => match volume0.open_root_dir() {
-                Ok(root_dir) => {
-                    // open file for log create. if exists, do not create new file
-                    let file_exists = root_dir.open_file_in_dir(LOG_FILE, Mode::ReadOnly).is_ok();
-                    if !file_exists {
-                        match root_dir.open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend) {
-                            Ok(file) => {
-                                let _ = file.write(b"Uptime,TemperatureC,PressureHPa\n");
-                                let _ = file.flush();
-                                info!("Created {} with header", LOG_FILE);
-                            }
-                            Err(_) => info!("Failed to create log file"),
-                        }
-                    }
-                }
-                Err(_) => info!("Failed to open root dir"),
-            },
-            Err(_) => info!("Failed to open volume"),
-        }
-
-        Some(Self { volume_mgr })
+        Some(Self {
+            volume_mgr,
+            card_ok: Cell::new(true),
+        })
     }
 
-    // log sample to file (+ 1 row of data)
-    pub fn log_sample(&self, uptime_secs: u64, temp_c: f32, pressure_hpa: f32) {
-        let h = uptime_secs / 3600;
-        let m = (uptime_secs % 3600) / 60;
-        let s = uptime_secs % 60;
+    // reinitialize card
+    fn reset_card(&self) {
+        self.volume_mgr.device(|dev| dev.mark_card_uninit());
+    }
+
+    // no log if no time sync
+    pub fn log_sample(&self, temp_c: f32, pressure_hpa: f32) {
+        let Some(dt) = rtc::now_datetime() else {
+            info!("Time not synced yet - skipping log entry");
+            return;
+        };
 
         let mut csv_line: String<64> = String::new();
         let _ = write!(
             csv_line,
-            "{:02}:{:02}:{:02},{:.1},{:.1}\n",
-            h, m, s, temp_c, pressure_hpa
+            "{:02}-{:02}-{:04},{:02}:{:02}:{:02},{:.1},{:.1}\n",
+            dt.day, dt.month, dt.year, dt.hour, dt.minute, dt.second, temp_c, pressure_hpa
         );
 
-        match self.volume_mgr.open_volume(VolumeIdx(0)) {
-            Ok(volume0) => match volume0.open_root_dir() {
-                Ok(root_dir) => {
-                    match root_dir.open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend) {
-                        Ok(file) => {
-                            let _ = file.write(csv_line.as_bytes());
-                            let _ = file.flush();
-                        }
-                        Err(_) => info!("Failed to open log file for write"),
-                    }
+        let result: Result<(), ()> = (|| {
+            let volume0 = self.volume_mgr.open_volume(VolumeIdx(0)).map_err(|_| ())?;
+            let root_dir = volume0.open_root_dir().map_err(|_| ())?;
+
+            let file_exists = root_dir.open_file_in_dir(LOG_FILE, Mode::ReadOnly).is_ok();
+            if !file_exists {
+                let header_file = root_dir
+                    .open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend)
+                    .map_err(|_| ())?;
+                header_file
+                    .write(b"Date,Time,TemperatureC,PressureHPa\n")
+                    .map_err(|_| ())?;
+                header_file.flush().map_err(|_| ())?;
+                info!("Created {} with header", LOG_FILE);
+            }
+
+            let file = root_dir
+                .open_file_in_dir(LOG_FILE, Mode::ReadWriteCreateOrAppend)
+                .map_err(|_| ())?;
+            file.write(csv_line.as_bytes()).map_err(|_| ())?;
+            file.flush().map_err(|_| ())?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                if !self.card_ok.replace(true) {
+                    info!("SD card reconnected - resuming logging");
                 }
-                Err(_) => info!("Failed to open root dir"),
-            },
-            Err(_) => info!("Failed to open volume"),
+            }
+            Err(()) => {
+                if self.card_ok.replace(false) {
+                    info!("SD card write failed (removed?) - will retry once it's back");
+                }
+
+                self.reset_card();
+            }
         }
     }
 }

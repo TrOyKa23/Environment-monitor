@@ -9,6 +9,8 @@ use embedded_graphics::primitives::{Arc, Circle, Line, Polyline, PrimitiveStyle,
 use embedded_graphics::text::Text;
 use heapless::String;
 
+use crate::rtc;
+
 const SCREEN_WIDTH: i32 = 320;
 const HEADER_HEIGHT: i32 = 24;
 const ROW_HEIGHT: i32 = (240 - HEADER_HEIGHT) / 2;
@@ -240,12 +242,29 @@ where
 {
     let text_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
 
-    // date placeholer
-    let _ = Text::new("YY:MM:DD", Point::new(4, 10), text_style).draw(display);
+    // NTP sync date, time else placeholder
+    let mut date_str: String<10> = String::new();
+    match rtc::now_datetime() {
+        Some(dt) => {
+            let _ = write!(
+                date_str,
+                "{:02}:{:02}:{:02}",
+                dt.day,
+                dt.month,
+                dt.year % 100
+            );
+        }
+        None => {
+            let _ = write!(date_str, "--:--:--");
+        }
+    }
+    let _ = Text::new(&date_str, Point::new(4, 10), text_style).draw(display);
 
-    // timestamp
-    let h = (uptime_secs / 3600) % 100;
-    let m = (uptime_secs % 3600) / 60;
+    // NTP sync time
+    let (h, m) = match rtc::now_datetime() {
+        Some(dt) => (dt.hour as u64, dt.minute as u64),
+        None => ((uptime_secs / 3600) % 100, (uptime_secs % 3600) / 60),
+    };
     let mut time_str: String<8> = String::new();
     let _ = write!(time_str, "{:02}:{:02}", h, m);
     let _ = Text::new(&time_str, Point::new(140, 10), text_style).draw(display);

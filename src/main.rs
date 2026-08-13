@@ -3,6 +3,8 @@
 
 mod bme_sensor;
 mod display;
+mod netsync;
+mod rtc;
 mod sdcard;
 mod ui;
 
@@ -21,6 +23,9 @@ use embassy_time::{Delay, Instant, Timer};
 
 use {defmt_rtt as _, panic_probe as _};
 
+const WIFI_SSID: &str = "---";
+const WIFI_PASSWORD: &str = "----";
+
 // Обязательный заголовок образа для RP2350 (аналог boot2 у RP2040)
 #[unsafe(link_section = ".start_block")]
 #[used]
@@ -30,8 +35,13 @@ bind_interrupts!(struct Irqs {
     I2C0_IRQ => I2cInterruptHandler<I2C0>;
 });
 
+#[embassy_executor::task]
+async fn wifi_sync_task(spawner: Spawner, pins: netsync::WifiPins) {
+    let _stack = netsync::start(spawner, pins, WIFI_SSID, WIFI_PASSWORD).await;
+}
+
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
     let sda = p.PIN_4;
@@ -86,6 +96,17 @@ async fn main(_spawner: Spawner) {
 
     info!("Display initialized");
 
+    // wifi sync in background
+    let wifi_pins = netsync::WifiPins {
+        pwr: p.PIN_23,
+        cs: p.PIN_25,
+        pio: p.PIO0,
+        dio: p.PIN_24,
+        clk: p.PIN_29,
+        dma: p.DMA_CH0,
+    };
+    spawner.spawn(wifi_sync_task(spawner, wifi_pins).unwrap());
+
     let start = Instant::now();
 
     loop {
@@ -109,7 +130,7 @@ async fn main(_spawner: Spawner) {
                 dashboard.update(&mut disp, uptime_secs, temp_c, pressure_hpa);
 
                 if let Some(logger) = &logger {
-                    logger.log_sample(uptime_secs, temp_c, pressure_hpa);
+                    logger.log_sample(temp_c, pressure_hpa);
                 }
             }
             Err(_e) => info!("Error reading sample"),

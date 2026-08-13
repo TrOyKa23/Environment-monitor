@@ -1,6 +1,6 @@
 # Environment-monitor
 
-A smart environmental monitoring station powered by Raspberry Pi Pico 2 W with SD logging, a real-time LCD dashboard, and Wi-Fi data sync for long-term analytics.
+A connected weather station powered by the Raspberry Pi Pico 2 W, featuring local SD card recording, an active LCD dashboard, and wireless synchronization for long-range data tracking.
 
 :::info
 
@@ -11,21 +11,21 @@ A smart environmental monitoring station powered by Raspberry Pi Pico 2 W with S
 
 ## Description
 
-Environment-monitor is an embedded Rust application built on the Embassy async framework for the Raspberry Pi Pico 2 W (RP2350). It periodically samples ambient temperature and barometric pressure using a BME280 sensor over I2C, displays real-time sparkline graphs and telemetry on an ST7789 LCD screen, logs data to a MicroSD card in CSV format (`TEMPLOG.CSV`), and transmits batch logs every 30 minutes via Wi-Fi to a remote server for daily, weekly, monthly, and yearly trend plotting.
+Environment-monitor runs as an asynchronous Rust program on the RP2350 microcontroller inside the Raspberry Pi Pico 2 W. It regularly polls ambient air pressure and temperature via a BME280 unit connected through an I2C bus, renders live sparklines and stats onto an ST7789 display, appends telemetry to a MicroSD card (`TEMPLOG.CSV`), and uploads batched records over the network every half-hour to an external host for comprehensive trend analysis.
 
 ## Motivation
 
-This project was built for educational and self-learning purposes to explore embedded development in Rust, modern async hardware runtimes (Embassy), shared SPI bus management, filesystem operations on microcontrollers, and IoT network protocol stacks.
+The initiative was undertaken for self-education and exploration into Rust-based embedded engineering, asynchronous hardware schedulers like Embassy, multiplexing a shared SPI bus, handling micro-scale filesystems, and working with IoT networking stacks.
 
 ## Architecture
 
-The architecture consists of an async Rust runtime executing concurrent tasks on the RP2350 microcontroller:
+Concurrent tasks are managed on the RP2350 chip using an async Rust environment:
 
-- **Main Processor**: Raspberry Pi Pico 2 W running the Embassy async executor.
-- **BME280 Sensor**: Communicates over I2C0 to provide temperature and pressure readings.
-- **ST7789 Display & SD Card**: Share the SPI1 bus using mutex-guarded SPI device handles (`SpiDeviceWithConfig`).
-- **SWD Probe**: A secondary Raspberry Pi Pico 2 W acts as an external hardware debugger via SWD (SWCLK, SWDIO).
-- **Wi-Fi Subsystem**: Uses `cyw43` and `embassy-net` stacks to handle TCP/IP network transport.
+- **Central Controller**: Raspberry Pi Pico 2 W executing the Embassy task runner.
+- **BME280 Sensor**: Links via I2C0 to capture pressure and temperature metrics.
+- **Display and Storage**: The ST7789 screen and SD card share the SPI1 channel, controlled via synchronized SPI device wrappers (`SpiDeviceWithConfig`).
+- **Debugging Probe**: A separate Raspberry Pi Pico 2 W provides out-of-circuit debugging over SWD (SWCLK and SWDIO lines).
+- **Wireless Layer**: Relies on the `cyw43` and `embassy-net` libraries for TCP/IP communications.
 
 ```
                       +-------------------------+           +-------------------------+
@@ -50,33 +50,41 @@ The architecture consists of an async Rust runtime executing concurrent tasks on
 
 ### Milestone 1 — Project Initialization & Sensor Setup
 
-- Configured Rust toolchain for target `thumbv8m.main-none-eabihf` and RP2350 chip definitions (`memory.x`, `build.rs`).
-- Integrated `bme280-rs` driver over async I2C.
-- Set up RTT logging via `defmt-rtt` and `panic-probe`.
-- Soldered pins on raspberry pi pico 2w and on the bmp280 sensor
+- Configured the toolchain for `thumbv8m.main-none-eabihf` alongside RP2350-specific configurations (`memory.x` and `build.rs`).
+- Integrated the `bme280-rs` library for asynchronous I2C communication.
+- Enabled RTT diagnostics utilizing `defmt-rtt` combined with `panic-probe`.
+- Soldered physical connections on both the Pico 2 W board and the BME280 breakout.
 
 ![Milestone 1](./1.webp)
 ![Milestone 1](./2.webp)
 
 ### Milestone 2 — Shared SPI Bus & Display UI
 
-- Implemented ST7789 display driver using `mipidsi` over SPI1.
-- Created `ui.rs` dashboard featuring a top header bar, status icons, uptime counter, big numerical readouts, and custom sparkline history charts using `embedded-graphics`.
+- Hooked up the ST7789 screen using the `mipidsi` crate over the SPI1 interface.
+- Developed `ui.rs` to generate a graphical interface complete with a top status bar, active icons, running uptime counters, large digit displays, and miniature historical charts built with `embedded-graphics`.
 
 ![Milestone 2](./3.webp)
 
 ### Milestone 3 — SD Card Filesystem Integration
 
-- Implemented shared SPI bus architecture (`SpiDeviceWithConfig` and `NoopRawMutex`) to allow safe multiplexing between display and SD card.
-- Integrated `embedded-sdmmc` to manage FAT volumes and automate CSV log writing (`TEMPLOG.CSV`) with formatting and header initialization.
-- Syncronizing UI and SD data
+- Established a shared bus layout (`SpiDeviceWithConfig` together with `NoopRawMutex`) to cleanly share the SPI channel between the display and storage module.
+- Employed `embedded-sdmmc` to handle FAT filesystems and automate writing comma-separated log entries into `TEMPLOG.CSV` with proper column headers.
+- Synchronizing display output and storage updates.
 
 ![Milestone 2](./4.webp)
 
 ### Milestone 4 — Async Network Stack & Server Sync
 
-- Configured PIO driver (`cyw43-pio`) and background tasks for the CYW43439 wireless chip.
-- Implemented 30-minute interval timer to packetize stored logs and push them over TCP/HTTP to a server for web-based graph rendering.
+- Initialized the `cyw43-pio` driver and necessary background routines for the CYW43439 Wi-Fi chip.
+- Set up a 30-minute interval trigger to bundle recorded logs and transmit them via HTTP/TCP to an upstream server for graphical rendering.
+
+### Milestone 5 — NTP Time Sync & Robust SD Logging
+
+- Configured a background wireless service to connect through DHCP and fetch accurate UTC timestamps from an NTP server upon startup.
+- Introduced a lightweight software RTC (`rtc.rs`) that calculates current dates and times based on the NTP anchor plus elapsed system uptime, adjusted for local timezone offsets.
+- CSV entries now feature precise Date and Time fields (replacing raw uptime tallies) alongside pressure and temperature readings; writing is deferred until time synchronization completes to maintain uniform records from the start.
+- The UI header switches from a placeholder to the synchronized clock once network time is acquired.
+- Added hot-plug recovery for the MicroSD card: extracting and reinserting the card allows file operations to resume automatically without requiring a hard reset.
 
 ## Hardware
 

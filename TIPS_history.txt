@@ -1,5 +1,4 @@
-TIP 1
-This time source for the FAT file system is required for directory metadata (file creation and modification timestamps), not for the actual CSV payload content. Since a hardware RTC module is not yet installed on the board, a fixed dummy stub is returned for now. Once a real RTC module (such as the DS3231) is added, simply replace the body of get_timestamp with time readings from the sensor—no other changes to the codebase will be necessary.
+
 
 TIP 2
 Function that makes timestamp from the moment of starting the device. Format is HH:MM:SS. After placing RTC module this function can be replaced.
