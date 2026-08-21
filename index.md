@@ -55,15 +55,15 @@ Concurrent tasks are managed on the RP2350 chip using an async Rust environment:
 - Enabled RTT diagnostics utilizing `defmt-rtt` combined with `panic-probe`.
 - Soldered physical connections on both the Pico 2 W board and the BME280 breakout.
 
-![Milestone 1](1.webp)
-![Milestone 1](2.webp)
+![Milestone 1](./img/1.webp)
+![Milestone 1](./img/2.webp)
 
 ### Milestone 2 — Shared SPI Bus & Display UI
 
 - Hooked up the ST7789 screen using the `mipidsi` crate over the SPI1 interface.
 - Developed `ui.rs` to generate a graphical interface complete with a top status bar, active icons, running uptime counters, large digit displays, and miniature historical charts built with `embedded-graphics`.
 
-![Milestone 2](3.webp)
+![Milestone 2](./img/3.webp)
 
 ### Milestone 3 — SD Card Filesystem Integration
 
@@ -71,7 +71,7 @@ Concurrent tasks are managed on the RP2350 chip using an async Rust environment:
 - Employed `embedded-sdmmc` to handle FAT filesystems and automate writing comma-separated log entries into `TEMPLOG.CSV` with proper column headers.
 - Synchronizing display output and storage updates.
 
-![Milestone 3](4.webp)
+![Milestone 3](./img/4.webp)
 
 ### Milestone 4 — Async Network Stack & Server Sync
 
@@ -98,8 +98,8 @@ The custom enclosure for this project was designed from scratch using **Blender*
 - Manifold Geometry: Ensuring the final mesh was completely watertight (manifold) for the slicer software without any flipped normals or internal faces.
 - Mounting Points: Designing internal standoffs and snap-fits for the components that are both printable without extensive supports and strong enough not to break off during assembly.
 
-![Milestone 3](5.webp)
-![Milestone 3](6.webp)
+![Milestone 3](./img/5.webp)
+![Milestone 3](./img/6.webp)
 
 ## Hardware
 
@@ -107,7 +107,7 @@ The system utilizes a Raspberry Pi Pico 2 W as the central unit connected to an 
 
 ### Schematics
 
-![Hardware Schematic](schema.webp)
+![Hardware Schematic](./img/schema.webp)
 
 ### Bill of Materials
 
