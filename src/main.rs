@@ -2,6 +2,7 @@
 #![no_main]
 
 mod bme_sensor;
+mod daily_history;
 mod display;
 mod netsync;
 mod rtc;
@@ -13,7 +14,7 @@ use defmt::info;
 use embassy_embedded_hal::shared_bus::blocking::spi::SpiDeviceWithConfig;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{Level, Output};
+use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::i2c::{self, Config as I2cConfig, InterruptHandler as I2cInterruptHandler};
 use embassy_rp::peripherals::I2C0;
 use embassy_rp::spi::{self, Spi};
@@ -38,6 +39,23 @@ bind_interrupts!(struct Irqs {
 #[embassy_executor::task]
 async fn wifi_sync_task(spawner: Spawner, pins: netsync::WifiPins) {
     let _stack = netsync::start(spawner, pins, WIFI_SSID, WIFI_PASSWORD).await;
+}
+#[embassy_executor::task]
+async fn button_task(mut btn: Input<'static>) {
+    loop {
+        btn.wait_for_falling_edge().await;
+
+        // anti-bounce
+        Timer::after_millis(30).await;
+        if !btn.is_low() {
+            continue;
+        }
+
+        ui::toggle_graph();
+
+        btn.wait_for_rising_edge().await;
+        Timer::after_millis(30).await;
+    }
 }
 
 #[embassy_executor::main]
@@ -71,7 +89,7 @@ async fn main(spawner: Spawner) {
     lcd_config.frequency = 32_000_000;
 
     let mut sd_config = spi::Config::default();
-    sd_config.frequency = 400_000;
+    sd_config.frequency = 4_000_000;
 
     let spi_bus = Spi::new_blocking(p.SPI1, clk, mosi, miso, lcd_config.clone());
     let spi_bus: Mutex<NoopRawMutex, _> = Mutex::new(RefCell::new(spi_bus));
@@ -107,35 +125,71 @@ async fn main(spawner: Spawner) {
     };
     spawner.spawn(wifi_sync_task(spawner, wifi_pins).unwrap());
 
+    // button
+    let button = Input::new(p.PIN_16, Pull::Up);
+    spawner.spawn(button_task(button).unwrap());
+
+    let mut daily_temps: [Option<f32>; daily_history::BUCKETS] = [None; daily_history::BUCKETS];
+    let mut graph_was_open = false;
+
     let start = Instant::now();
 
+    // 1 fps full redraw (refresh) of screen
+    const TICK_MS: u64 = 200;
+    const TICKS_PER_FULL_UPDATE: u32 = 5;
+
+    let mut tick: u32 = 0;
+    let mut anim_frame: usize = 0;
+
     loop {
-        match bme280.read_sample().await {
-            Ok(sample) => {
-                let temp_c = sample.temperature.unwrap_or(0.0);
-                let pressure_hpa = sample.pressure.unwrap_or(0.0) / 100.0;
+        if tick % TICKS_PER_FULL_UPDATE == 0 {
+            match bme280.read_sample().await {
+                Ok(sample) => {
+                    let temp_c = sample.temperature.unwrap_or(0.0);
+                    let pressure_hpa = sample.pressure.unwrap_or(0.0) / 100.0;
 
-                let t_int = temp_c as i32;
-                let t_frac = ((temp_c * 10.0) as i32 % 10).abs();
-                let p_int = pressure_hpa as i32;
-                let p_frac = ((pressure_hpa * 10.0) as i32 % 10).abs();
+                    let t_int = temp_c as i32;
+                    let t_frac = ((temp_c * 10.0) as i32 % 10).abs();
+                    let p_int = pressure_hpa as i32;
+                    let p_frac = ((pressure_hpa * 10.0) as i32 % 10).abs();
 
-                info!(
-                    "temp: {}.{} C, pressure: {}.{} hPa",
-                    t_int, t_frac, p_int, p_frac
-                );
+                    info!(
+                        "temp: {}.{} C, pressure: {}.{} hPa",
+                        t_int, t_frac, p_int, p_frac
+                    );
 
-                let uptime_secs = (Instant::now() - start).as_secs();
+                    let uptime_secs = (Instant::now() - start).as_secs();
 
-                dashboard.update(&mut disp, uptime_secs, temp_c, pressure_hpa);
+                    let graph_now_open = ui::graph_is_open();
+                    if graph_now_open && !graph_was_open {
+                        if let Some(logger) = &logger {
+                            daily_temps = logger.read_daily_temps();
+                        }
+                    }
+                    graph_was_open = graph_now_open;
 
-                if let Some(logger) = &logger {
-                    logger.log_sample(temp_c, pressure_hpa);
+                    dashboard.update(
+                        &mut disp,
+                        uptime_secs,
+                        temp_c,
+                        pressure_hpa,
+                        &daily_temps,
+                        anim_frame,
+                    );
+
+                    if let Some(logger) = &logger {
+                        logger.log_sample(temp_c, pressure_hpa);
+                    }
                 }
+                Err(_e) => info!("Error reading sample"),
             }
-            Err(_e) => info!("Error reading sample"),
+        } else {
+            // only wifi icon redraw between full frames
+            ui::redraw_wifi_icon(&mut disp, anim_frame);
         }
 
-        Timer::after_secs(1).await;
+        anim_frame = anim_frame.wrapping_add(1);
+        tick = tick.wrapping_add(1);
+        Timer::after_millis(TICK_MS).await;
     }
 }

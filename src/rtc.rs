@@ -10,6 +10,10 @@ pub fn set_synced_time(unix_secs: u64) {
     SYNCED_UNIX.store(unix_secs, Ordering::Relaxed);
 }
 
+pub fn is_synced() -> bool {
+    SYNCED_UNIX.load(Ordering::Relaxed) != 0
+}
+
 pub fn now_unix() -> Option<u64> {
     let base = SYNCED_UNIX.load(Ordering::Relaxed);
     if base == 0 {
@@ -61,4 +65,37 @@ pub fn now_datetime() -> Option<DateTime> {
         minute,
         second,
     })
+}
+
+// convertion from unix to regular date/time (for CSV log parsing)
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+// makes sure that the returned value is not negative (for dates before 1970)
+pub fn unix_from_local(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> u64 {
+    let days = days_from_civil(year as i64, month as i64, day as i64);
+    let local_secs = days * 86_400 + hour as i64 * 3600 + minute as i64 * 60 + second as i64;
+    (local_secs - TZ_OFFSET_SECS).max(0) as u64
+}
+
+// data and date parsing from CSV log for SD card
+pub fn unix_from_local_str(date_field: &str, time_field: &str) -> Option<u64> {
+    let mut d_parts = date_field.split('-');
+    let day: u8 = d_parts.next()?.parse().ok()?;
+    let month: u8 = d_parts.next()?.parse().ok()?;
+    let year: u16 = d_parts.next()?.parse().ok()?;
+
+    let mut t_parts = time_field.split(':');
+    let hour: u8 = t_parts.next()?.parse().ok()?;
+    let minute: u8 = t_parts.next()?.parse().ok()?;
+    let second: u8 = t_parts.next()?.parse().ok()?;
+
+    Some(unix_from_local(year, month, day, hour, minute, second))
 }

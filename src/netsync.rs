@@ -107,6 +107,7 @@ pub async fn start(
     );
     spawner.spawn(net_task(runner).unwrap());
 
+    crate::ui::set_wifi_connecting();
     join_wifi(&mut control, ssid, password).await;
 
     info!("Wi-Fi: waiting for link...");
@@ -114,6 +115,8 @@ pub async fn start(
     info!("Wi-Fi: waiting for DHCP...");
     stack.wait_config_up().await;
     info!("Wi-Fi: connected, IP configured");
+    // if NTP fails (is not connected) the WIFI is still working, so we can show "connected" already, not waiting for NTP result
+    crate::ui::set_wifi_connected();
 
     match sync_ntp(&stack).await {
         Some(unix_secs) => {

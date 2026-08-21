@@ -1,4 +1,5 @@
 use core::fmt::Write as _;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use embedded_graphics::Pixel;
 use embedded_graphics::geometry::Angle;
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -9,6 +10,7 @@ use embedded_graphics::primitives::{Arc, Circle, Line, Polyline, PrimitiveStyle,
 use embedded_graphics::text::Text;
 use heapless::String;
 
+use crate::daily_history::BUCKETS;
 use crate::rtc;
 
 const SCREEN_WIDTH: i32 = 320;
@@ -19,6 +21,35 @@ const HISTORY_LEN: usize = 60;
 const TEMP_STEP: f32 = 0.1;
 const PRESSURE_STEP: f32 = 10.0;
 const STEPS_VISIBLE: f32 = 8.0;
+
+static GRAPH_OPEN: AtomicBool = AtomicBool::new(false);
+
+pub fn toggle_graph() {
+    GRAPH_OPEN.fetch_xor(true, Ordering::Relaxed);
+}
+
+pub fn graph_is_open() -> bool {
+    GRAPH_OPEN.load(Ordering::Relaxed)
+}
+
+const WIFI_DISCONNECTED: u8 = 0;
+const WIFI_CONNECTING: u8 = 1;
+const WIFI_CONNECTED: u8 = 2;
+static WIFI_STATUS: AtomicU8 = AtomicU8::new(WIFI_DISCONNECTED);
+
+pub fn set_wifi_connecting() {
+    WIFI_STATUS.store(WIFI_CONNECTING, Ordering::Relaxed);
+}
+
+pub fn set_wifi_connected() {
+    WIFI_STATUS.store(WIFI_CONNECTED, Ordering::Relaxed);
+}
+
+fn wifi_status() -> u8 {
+    WIFI_STATUS.load(Ordering::Relaxed)
+}
+
+const WIFI_ICON_TOP_LEFT: Point = Point::new(292, 2);
 
 struct History {
     buf: [f32; HISTORY_LEN],
@@ -204,11 +235,12 @@ where
     .draw(display);
 }
 
-fn draw_wifi_icon<D>(display: &mut D, top_left: Point)
+// wifi icon
+fn draw_wifi_icon_shape<D>(display: &mut D, top_left: Point, color: Rgb565)
 where
     D: DrawTarget<Color = Rgb565>,
 {
-    let stroke = PrimitiveStyle::with_stroke(Rgb565::WHITE, 2);
+    let stroke = PrimitiveStyle::with_stroke(color, 2);
     for (i, d) in [6i32, 12, 18].iter().enumerate() {
         let inset = (18 - d) / 2;
         let _ = Arc::new(
@@ -221,8 +253,75 @@ where
         .draw(display);
     }
     let _ = Circle::new(top_left + Point::new(7, 16), 4)
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+        .into_styled(PrimitiveStyle::with_fill(color))
         .draw(display);
+}
+
+// icon if wifi not connected
+fn draw_wifi_disconnected<D>(display: &mut D, top_left: Point)
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let dim = Rgb565::new(8, 16, 8);
+    draw_wifi_icon_shape(display, top_left, dim);
+    let stroke = PrimitiveStyle::with_stroke(Rgb565::new(20, 8, 8), 2);
+    let _ = Line::new(top_left + Point::new(0, 0), top_left + Point::new(18, 18))
+        .into_styled(stroke)
+        .draw(display);
+    let _ = Line::new(top_left + Point::new(18, 0), top_left + Point::new(0, 18))
+        .into_styled(stroke)
+        .draw(display);
+}
+
+// wifi (connection) icon animation
+fn draw_wifi_connecting<D>(display: &mut D, top_left: Point, frame: usize)
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let stroke = PrimitiveStyle::with_stroke(Rgb565::new(24, 40, 0), 2);
+    let start_deg = (frame % 8) as f32 * 45.0;
+    let _ = Arc::new(
+        top_left + Point::new(9, 9),
+        18,
+        Angle::from_degrees(start_deg),
+        Angle::from_degrees(90.0),
+    )
+    .into_styled(stroke)
+    .draw(display);
+}
+
+// wifi (connected) icon
+fn draw_wifi_connected<D>(display: &mut D, top_left: Point)
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    draw_wifi_icon_shape(display, top_left, Rgb565::new(0, 55, 5));
+}
+
+fn draw_wifi_icon<D>(display: &mut D, top_left: Point, frame: usize)
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    match wifi_status() {
+        WIFI_CONNECTED => draw_wifi_connected(display, top_left),
+        WIFI_CONNECTING => draw_wifi_connecting(display, top_left, frame),
+        _ => draw_wifi_disconnected(display, top_left),
+    }
+}
+
+// higher refreshrate for wifi icon animation
+pub fn redraw_wifi_icon<D>(display: &mut D, frame: usize)
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    if graph_is_open() {
+        return;
+    }
+    let erase_rect = Rectangle::new(Point::new(286, 0), Size::new(34, HEADER_HEIGHT as u32));
+    let _ = erase_rect
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(display);
+    draw_wifi_icon(display, WIFI_ICON_TOP_LEFT, frame);
 }
 
 fn draw_bt_off_icon<D>(display: &mut D, top_left: Point)
@@ -236,7 +335,7 @@ where
         .draw(display);
 }
 
-fn draw_header<D>(display: &mut D, uptime_secs: u64)
+fn draw_header<D>(display: &mut D, uptime_secs: u64, anim_frame: usize)
 where
     D: DrawTarget<Color = Rgb565>,
 {
@@ -272,7 +371,7 @@ where
     // decorations (hoping to make them functional (wifi data sync transfer and wifi connectivity))
     draw_sync_icon(display, Point::new(236, 8));
     draw_bt_off_icon(display, Point::new(262, 2));
-    draw_wifi_icon(display, Point::new(292, 2));
+    draw_wifi_icon(display, Point::new(292, 2), anim_frame);
 
     let _ = Line::new(
         Point::new(0, HEADER_HEIGHT - 2),
@@ -310,6 +409,96 @@ fn draw_row<D>(
     draw_sparkline(display, graph_rect, history, step);
 }
 
+// additional graph for last 24h temperature
+fn draw_daily_graph<D>(display: &mut D, points: &[Option<f32>; BUCKETS])
+where
+    D: DrawTarget<Color = Rgb565>,
+{
+    let _ = display.clear(Rgb565::BLACK);
+
+    let text_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    let _ = Text::new(
+        "Temp - last 24h (tap button to close)",
+        Point::new(6, 12),
+        text_style,
+    )
+    .draw(display);
+
+    let margin_left = 34;
+    let margin_right = 8;
+    let margin_top = 22;
+    let margin_bottom = 20;
+    let chart_rect = Rectangle::new(
+        Point::new(margin_left, margin_top),
+        Size::new(
+            (SCREEN_WIDTH - margin_left - margin_right) as u32,
+            (240 - margin_top - margin_bottom) as u32,
+        ),
+    );
+    let _ = chart_rect
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::new(10, 20, 10), 1))
+        .draw(display);
+
+    let known: heapless::Vec<(usize, f32), BUCKETS> = points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.map(|val| (i, val)))
+        .collect();
+
+    if known.len() < 2 {
+        let _ = Text::new(
+            "Not enough data yet",
+            Point::new(margin_left + 10, margin_top + 40),
+            text_style,
+        )
+        .draw(display);
+        let _ = Text::new(
+            "(keeps a point every 30 min)",
+            Point::new(margin_left + 10, margin_top + 52),
+            text_style,
+        )
+        .draw(display);
+        return;
+    }
+
+    let min = known.iter().map(|(_, v)| *v).fold(f32::INFINITY, f32::min);
+    let max = known
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f32::NEG_INFINITY, f32::max);
+    // 0 devide protection + some margin for better visual
+    let span = (max - min).max(0.5) * 1.2;
+    let mid = (max + min) / 2.0;
+
+    let w = chart_rect.size.width as i32;
+    let h = chart_rect.size.height as i32;
+
+    let mut poly_points: heapless::Vec<Point, BUCKETS> = heapless::Vec::new();
+    for (i, v) in known.iter() {
+        let x = chart_rect.top_left.x + (*i as i32 * w) / (BUCKETS as i32 - 1).max(1);
+        let delta = *v - mid;
+        let y = chart_rect.top_left.y + h / 2 - ((delta / span) * h as f32) as i32;
+        let y = y.clamp(chart_rect.top_left.y, chart_rect.top_left.y + h);
+        let _ = poly_points.push(Point::new(x, y));
+    }
+
+    let _ = Polyline::new(&poly_points)
+        .into_styled(PrimitiveStyle::with_stroke(Rgb565::WHITE, 1))
+        .draw(display);
+
+    // max and min labels
+    let mut max_str: String<8> = String::new();
+    let _ = write!(max_str, "{:.1}", max);
+    let _ = Text::new(&max_str, Point::new(2, margin_top + 8), text_style).draw(display);
+
+    let mut min_str: String<8> = String::new();
+    let _ = write!(min_str, "{:.1}", min);
+    let _ = Text::new(&min_str, Point::new(2, margin_top + h - 2), text_style).draw(display);
+
+    let _ = Text::new("-24h", Point::new(margin_left, 236), text_style).draw(display);
+    let _ = Text::new("now", Point::new(SCREEN_WIDTH - 28, 236), text_style).draw(display);
+}
+
 pub struct Dashboard {
     temp_history: History,
     pressure_history: History,
@@ -324,16 +513,28 @@ impl Dashboard {
     }
 
     //full lcd refresh with new values
-    pub fn update<D>(&mut self, display: &mut D, uptime_secs: u64, temp_c: f32, pressure_hpa: f32)
-    where
+    pub fn update<D>(
+        &mut self,
+        display: &mut D,
+        uptime_secs: u64,
+        temp_c: f32,
+        pressure_hpa: f32,
+        daily_temps: &[Option<f32>; BUCKETS],
+        anim_frame: usize,
+    ) where
         D: DrawTarget<Color = Rgb565>,
     {
         self.temp_history.push(temp_c);
         self.pressure_history.push(pressure_hpa);
 
+        if graph_is_open() {
+            draw_daily_graph(display, daily_temps);
+            return;
+        }
+
         let _ = display.clear(Rgb565::BLACK);
 
-        draw_header(display, uptime_secs);
+        draw_header(display, uptime_secs, anim_frame);
 
         draw_row(
             display,
